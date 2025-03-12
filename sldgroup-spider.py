@@ -28,15 +28,21 @@ from random_user_agent import random_ua
 
 # 全局配置 / Global Configuration
 PICTURE_DIR = 'picture'  # 主图片目录 / Main image directory
-DEFAULT_SAVE_DIRS = ["residential", "clubhouse", "salesoffice", "hospitality", "commercial"]
+DEFAULT_SAVE_DIRS = ["salesoffice", "residential", "clubhouse", "hospitality", "commercial"]
 
 # 默认子页面URL最大ID / Maximum ID for subpages (will be updated dynamically if possible)
 DEFAULT_MAX_IDS = {
+    "salesoffice": 12,  # 销售中心 / Sales Office
     "residential": 34,  # 住宅 / Residential
     "clubhouse": 7,     # 会所 / Clubhouse
-    "salesoffice": 12,  # 销售中心 / Sales Office
     "hospitality": 24,  # 酒店 / Hospitality
     "commercial": 18    # 商业 / Commercial
+}
+
+# URL路径映射（确保使用正确的URL格式）/ URL path mapping (ensure correct URL format)
+URL_PATH_MAPPING = {
+    "salesoffice": "saleoffice",  # 特殊情况：销售中心URL路径是saleoffice而非salesoffice
+    # 其他分类使用相同的名称
 }
 
 # ChromeDriver配置 / ChromeDriver Configuration
@@ -781,7 +787,10 @@ class SLDSpider:
         
         for category in self.save_dirs:
             try:
-                category_url = f"https://www.sldgroup.com/tc/{category}.aspx"
+                # 使用URL路径映射确保正确的URL格式
+                url_path = URL_PATH_MAPPING.get(category, category)
+                category_url = f"https://www.sldgroup.com/tc/{url_path}.aspx"
+                
                 print(f"访问分类页面 / Visiting category page: {category_url}")
                 self.driver.get(category_url)
                 time.sleep(3)
@@ -885,6 +894,12 @@ class SLDSpider:
         retry_count = 0
         max_retries = MAX_PAGE_RETRIES  # 增加最大重试次数
         
+        # 添加特殊处理，针对salesoffice分类
+        is_salesoffice = save_dir == "salesoffice"
+        if is_salesoffice:
+            print("  • 检测到销售中心分类，使用特殊处理逻辑 / Detected sales office category, using special handling")
+            max_retries += 2  # 为销售中心增加额外重试次数
+        
         while not page_loaded and retry_count <= max_retries:
             try:
                 if retry_count > 0:
@@ -901,6 +916,18 @@ class SLDSpider:
                 if retry_count >= 2:
                     print("清除cookies，模拟新会话 / Clearing cookies to simulate new session")
                     self.driver.delete_all_cookies()
+                    
+                    # 如果是salesoffice分类，添加额外的处理
+                    if is_salesoffice and retry_count >= 3:
+                        print("  • 销售中心页面加载困难，尝试额外步骤 / Sales office page loading difficult, trying extra steps")
+                        try:
+                            # 先访问首页再访问目标页
+                            self.driver.get("https://www.sldgroup.com/tc/index.aspx")
+                            time.sleep(3)
+                            # 刷新本地存储
+                            self.driver.execute_script('window.localStorage.clear(); window.sessionStorage.clear();')
+                        except:
+                            pass
                 
                 # 访问页面
                 self.driver.get(project_detail_url)
@@ -928,7 +955,7 @@ class SLDSpider:
                             break
                         except:
                             continue
-                            
+                        
                     # 如果选择器检测都失败，但页面有内容，也认为加载成功 / If selector detection fails but page has content, consider loading successful
                     if not page_loaded and len(self.driver.page_source) > 1000:
                         print("页面内容已加载，尝试继续处理 / Page content loaded, trying to proceed")
@@ -941,48 +968,250 @@ class SLDSpider:
                 retry_count += 1
                 if retry_count > max_retries:
                     print(f"页面加载失败，已达到最大重试次数: {str(e)} / Page loading failed, max retries reached: {str(e)}")
+                    
+                    # 输出详细错误信息
+                    try:
+                        import traceback
+                        print("详细错误信息: / Detailed error information:")
+                        traceback.print_exc()
+                    except:
+                        pass
+                    
+                    # 如果是销售中心分类，尝试使用备用URL
+                    if is_salesoffice:
+                        alt_url = project_detail_url.replace("salesoffice-detail", "saleoffice-detail")
+                        if alt_url != project_detail_url:
+                            print(f"尝试备用URL: {alt_url} / Trying alternative URL")
+                            # 使用递归调用尝试备用URL
+                            return self._download_images(save_dir, alt_url, project_id)
+                    
                     # 如果所有尝试都失败，则这个链接可能是无效的，抛出异常让上层函数尝试其他URL格式 / If all attempts fail, this link may be invalid, raise exception for upper function to try other URL formats
                     raise Exception(f"页面加载失败: {str(e)} / Page loading failed")
                 print(f"页面加载错误，将重试: {str(e)} / Page loading error, will retry: {str(e)}")
         
         try:
-            # 寻找所有图片元素 - 尝试多种可能的选择器 / Find all image elements - try multiple possible selectors
+            # 寻找所有图片元素 - 使用增强的通用选择器 / Find all image elements - use enhanced universal selectors
             image_elements = []
-            possible_selectors = [
-                '//*[@id="mSwiperDiv"]/div/img',
+            
+            # 统一处理所有分类的通用选择器 / Universal selectors for all categories
+            universal_selectors = [
+                # 项目详情图片的常见选择器 / Common selectors for project detail images
+                '//div[contains(@class, "detail_img")]//img',
+                '//div[@id="mSwiperDiv"]//div[contains(@class, "swiper-wrapper")]//img',
+                '//div[@class="detail_img"]//div[@class="swiper-slide"]//img',
                 '//div[@class="swiper-slide"]//img',
                 '//img[@class="getWidth"]',
                 '//*[@id="mSwiperDiv"]//img',
-                '//img[contains(@src, "Work/Detail")]'  # 更宽泛的选择器，基于图片路径特征
+                '//img[contains(@src, "Work/Detail")]',
+                '//img[contains(@src, "UploadFile")]',
+                '//*[@id="mSwiperDiv"]/div/img'
             ]
             
-            for selector in possible_selectors:
+            for selector in universal_selectors:
                 try:
                     found_elements = self.driver.find_elements(By.XPATH, selector)
                     if found_elements:
-                        # 排除空src的元素 / Exclude elements with empty src
-                        valid_elements = [e for e in found_elements if e.get_attribute('src') and e.get_attribute('src').strip() != '']
+                        # 过滤掉横幅图片或广告图片 / Filter out banner images or advertisement images
+                        valid_elements = [e for e in found_elements if e.get_attribute('src') and 
+                                        e.get_attribute('src').strip() != '' and
+                                        not ('banner_' in e.get_attribute('src')) and
+                                        not ('ad_' in e.get_attribute('src'))]
                         if valid_elements:
                             image_elements = valid_elements
-                            print(f"使用选择器 {selector} 找到 {len(image_elements)} 个图片 / Found images using selector")
+                            print(f"使用选择器 {selector} 找到 {len(image_elements)} 个图片 / Found images using selector: {selector}")
                             break
-                except:
+                except Exception as e:
+                    print(f"选择器 {selector} 异常: {str(e)} / Selector exception")
                     continue
             
-            # 如果所有选择器都失败，尝试使用JavaScript直接提取所有图片 / If all selectors fail, try to extract all images directly using JavaScript
+            # 如果所有选择器都失败，使用更通用的JavaScript方法直接提取所有图片 / If all selectors fail, use more generic JavaScript to extract all images directly
             if not image_elements:
                 try:
-                    print("尝试使用JavaScript提取图片 / Trying to extract images using JavaScript")
+                    print("尝试使用轮播组件的aria-label属性获取图片 / Trying to get images using carousel's aria-label attribute")
+                    
+                    # 首先尝试获取轮播组件并检查是否有aria-label属性
+                    carousel_info = self.driver.execute_script("""
+                        const carousel = document.querySelector('#mSwiperDiv > div[aria-label]');
+                        if (!carousel) return null;
+                        
+                        const ariaLabel = carousel.getAttribute('aria-label');
+                        const match = ariaLabel ? ariaLabel.match(/(\\d+)\\s*\\/\\s*(\\d+)/) : null;
+                        
+                        if (match) {
+                            return {
+                                currentIndex: parseInt(match[1]),
+                                totalImages: parseInt(match[2]),
+                                hasAriaLabel: true
+                            };
+                        }
+                        return null;
+                    """)
+                    
+                    if carousel_info:
+                        print(f"✓ 找到轮播组件！当前图片: {carousel_info['currentIndex']}, 总图片数: {carousel_info['totalImages']} / Found carousel! Current image: {carousel_info['currentIndex']}, Total images: {carousel_info['totalImages']}")
+                        
+                        # 使用总图片数来创建图片元素列表
+                        total_images = carousel_info['totalImages']
+                        loaded_images = []
+                        
+                        # 存储每个图片对应的实际轮播编号(从1开始)
+                        image_carousel_numbers = []
+                        
+                        # 获取第一张图片和它的编号
+                        current_img = self.driver.find_element(By.XPATH, '//*[@id="mSwiperDiv"]/div[1]/img')
+                        current_number = carousel_info['currentIndex']
+                        if current_img:
+                            loaded_images.append(current_img)
+                            image_carousel_numbers.append(current_number)
+                            print(f"获取第 {current_number}/{total_images} 张图片 / Got image {current_number}/{total_images}")
+                        
+                        # 如果总图片数大于1，使用轮播组件按钮切换并获取更多图片
+                        if total_images > 1:
+                            for i in range(1, total_images):
+                                try:
+                                    # 尝试点击"下一张"按钮
+                                    next_button = self.driver.find_element(By.CSS_SELECTOR, ".swiper-button-next")
+                                    next_button.click()
+                                    time.sleep(0.5)  # 等待图片加载
+                                    
+                                    # 获取当前图片编号
+                                    current_carousel_info = self.driver.execute_script("""
+                                        const carousel = document.querySelector('#mSwiperDiv > div[aria-label]');
+                                        if (!carousel) return null;
+                                        const ariaLabel = carousel.getAttribute('aria-label');
+                                        const match = ariaLabel ? ariaLabel.match(/(\\d+)\\s*\\/\\s*(\\d+)/) : null;
+                                        return match ? parseInt(match[1]) : null;
+                                    """)
+                                    
+                                    # 获取当前显示的图片
+                                    current_img = self.driver.find_element(By.XPATH, '//*[@id="mSwiperDiv"]/div[1]/img')
+                                    if current_img and current_carousel_info:
+                                        # 检查是否与之前的图片重复（比较src属性）
+                                        current_src = current_img.get_attribute('src')
+                                        if all(img.get_attribute('src') != current_src for img in loaded_images):
+                                            loaded_images.append(current_img)
+                                            image_carousel_numbers.append(current_carousel_info)
+                                            print(f"获取第 {current_carousel_info}/{total_images} 张图片 / Got image {current_carousel_info}/{total_images}")
+                                        else:
+                                            print(f"图片 {current_carousel_info} 与之前的图片重复，尝试再次点击 / Image {current_carousel_info} duplicates previous image, trying click again")
+                                            next_button.click()
+                                            time.sleep(1)  # 等待更长时间
+                                            
+                                            # 重新获取编号和图片
+                                            current_carousel_info = self.driver.execute_script("""
+                                                const carousel = document.querySelector('#mSwiperDiv > div[aria-label]');
+                                                if (!carousel) return null;
+                                                const ariaLabel = carousel.getAttribute('aria-label');
+                                                const match = ariaLabel ? ariaLabel.match(/(\\d+)\\s*\\/\\s*(\\d+)/) : null;
+                                                return match ? parseInt(match[1]) : null;
+                                            """)
+                                            
+                                            current_img = self.driver.find_element(By.XPATH, '//*[@id="mSwiperDiv"]/div[1]/img')
+                                            if current_img and current_carousel_info:
+                                                loaded_images.append(current_img)
+                                                image_carousel_numbers.append(current_carousel_info)
+                                                print(f"重试后获取第 {current_carousel_info}/{total_images} 张图片 / Got image {current_carousel_info}/{total_images} after retry")
+                                except Exception as click_e:
+                                    print(f"点击下一张按钮或获取图片时出错: {str(click_e)} / Error clicking next button or getting image")
+                        
+                        if loaded_images:
+                            # 使用新的方式保存图片元素和对应的轮播编号
+                            image_elements = []
+                            carousel_numbers = []
+                            
+                            # 过滤重复图片和编号
+                            seen_srcs = set()
+                            for img, num in zip(loaded_images, image_carousel_numbers):
+                                src = img.get_attribute('src')
+                                if src not in seen_srcs:
+                                    seen_srcs.add(src)
+                                    image_elements.append(img)
+                                    carousel_numbers.append(num)
+                            
+                            # 保存轮播编号到全局变量，以便后续使用
+                            self.current_carousel_numbers = carousel_numbers
+                            
+                            print(f"通过轮播组件成功获取 {len(image_elements)}/{total_images} 张图片 / Successfully got {len(image_elements)}/{total_images} images via carousel")
+                    else:
+                        print("未找到带有aria-label属性的轮播组件，尝试其他方法 / No carousel with aria-label found, trying other methods")
+                        
+                except Exception as carousel_e:
+                    print(f"使用轮播组件获取图片失败: {str(carousel_e)} / Failed to get images using carousel")
+                
+                # 如果轮播方法失败，继续尝试通用JavaScript方法
+                if not image_elements:
+                    try:
+                        print("使用通用JavaScript方法提取图片 / Using generic JavaScript to extract images")
+                        js_images = self.driver.execute_script("""
+                            // 提取所有有价值的图片（排除小图标、banner和广告）
+                            // Extract all valuable images (exclude small icons, banners and ads)
+                            return Array.from(document.querySelectorAll('img'))
+                                .filter(img => {
+                                    // 排除无效图片
+                                    if (!img.src || img.src.trim() === '') 
+                                        return false;
+                                    
+                                    // 排除横幅和广告图片
+                                    if (img.src.includes('banner_') || img.src.includes('ad_')) 
+                                        return false;
+                                    
+                                    // 尺寸检查 - 排除小图标
+                                    const rect = img.getBoundingClientRect();
+                                    const visibleWidth = img.width || rect.width;
+                                    const visibleHeight = img.height || rect.height;
+                                    
+                                    // 必须足够大才算有价值的图片
+                                    return (visibleWidth > 200 && visibleHeight > 150);
+                                })
+                                .map(img => img);
+                        """)
+                        if js_images:
+                            image_elements = js_images
+                            print(f"通过JavaScript找到 {len(image_elements)} 个项目图片 / Found {len(image_elements)} project images using JavaScript")
+                    except Exception as js_e:
+                        print(f"JavaScript提取图片失败: {str(js_e)} / JavaScript image extraction failed")
+            
+            # 如果还是找不到，尝试一个基于图片尺寸和来源的过滤方法 / If still cannot find, try filtering based on image size and source
+            if not image_elements:
+                try:
+                    print("使用深度图片提取方法 / Using deep image extraction method")
                     js_images = self.driver.execute_script("""
-                        return Array.from(document.querySelectorAll('img'))
-                               .filter(img => img.src && img.src.includes('Work/Detail'))
-                               .map(img => img);
+                        // 最终的图片提取方法，尝试获取所有页面中有意义的图片
+                        // Final image extraction method, trying to get all meaningful images from the page
+                        const allImages = document.querySelectorAll('img');
+                        console.log("Total images on page: " + allImages.length);
+                        
+                        // 过滤有价值的图片
+                        return Array.from(allImages)
+                           .filter(img => {
+                                // 基本验证
+                                if (!img.src || img.src.trim() === '') 
+                                    return false;
+                                
+                                // 排除已知的无用图片
+                                if (img.src.includes('banner_') || 
+                                    img.src.includes('ad_') || 
+                                    img.src.includes('logo') || 
+                                    img.src.includes('icon'))
+                                    return false;
+                                
+                                // 计算实际尺寸和比例
+                                const rect = img.getBoundingClientRect();
+                                const visibleWidth = img.width || rect.width;
+                                const visibleHeight = img.height || rect.height;
+                                
+                                // 排除太小的图片和按钮图标
+                                if (visibleWidth < 250 || visibleHeight < 150)
+                                    return false;
+                                    
+                                return true;
+                           });
                     """)
                     if js_images:
                         image_elements = js_images
-                        print(f"通过JavaScript找到 {len(image_elements)} 个图片 / Found images using JavaScript")
-                except Exception as js_e:
-                    print(f"JavaScript提取图片失败: {str(js_e)} / JavaScript image extraction failed")
+                        print(f"通过深度提取方法找到 {len(image_elements)} 个图片 / Found {len(image_elements)} images using deep extraction method")
+                except Exception as size_e:
+                    print(f"深度图片提取失败: {str(size_e)} / Deep image extraction failed")
             
             if not image_elements:
                 print(f"未找到图片，可能是空项目或无效URL / No images found, might be an empty project or invalid URL")
@@ -1023,6 +1252,13 @@ class SLDSpider:
                     "retries": 0
                 }
                 
+                # 使用轮播编号作为图片名称（如果可用）
+                carousel_number = None
+                if hasattr(self, 'current_carousel_numbers') and idx < len(self.current_carousel_numbers):
+                    carousel_number = self.current_carousel_numbers[idx]
+                    image_info["carousel_number"] = carousel_number
+                    image_info["path"] = f"{save_dir}/id{project_id}_{carousel_number}"  # 使用轮播编号命名
+                
                 # 单张图片处理的重试机制
                 img_retry_count = 0
                 max_img_retries = MAX_IMG_RETRIES
@@ -1031,13 +1267,24 @@ class SLDSpider:
                 while not img_processed and img_retry_count <= max_img_retries:
                     try:
                         # 检查图片是否已下载（检查多种可能的扩展名）
-                        if is_image_downloaded(save_dir, project_id, idx):
-                            print(f"• 图片 {idx+1}/{len(image_elements)} 已存在，跳过 [id{project_id}_{idx}.*] / Skip existing image")
-                            image_info["status"] = "skipped"
-                            image_info["reason"] = "already exists"
-                            image_status["skipped"] += 1
-                            img_processed = True
-                            break  # 已存在则跳出重试循环
+                        if carousel_number:
+                            # 使用轮播编号检查
+                            if is_image_downloaded(save_dir, project_id, carousel_number):
+                                print(f"• 图片 {idx+1}/{len(image_elements)} (轮播编号 {carousel_number}) 已存在，跳过 [id{project_id}_{carousel_number}.*] / Skip existing image")
+                                image_info["status"] = "skipped"
+                                image_info["reason"] = "already exists"
+                                image_status["skipped"] += 1
+                                img_processed = True
+                                break  # 已存在则跳出重试循环
+                        else:
+                            # 使用常规索引检查
+                            if is_image_downloaded(save_dir, project_id, idx):
+                                print(f"• 图片 {idx+1}/{len(image_elements)} 已存在，跳过 [id{project_id}_{idx}.*] / Skip existing image")
+                                image_info["status"] = "skipped"
+                                image_info["reason"] = "already exists"
+                                image_status["skipped"] += 1
+                                img_processed = True
+                                break  # 已存在则跳出重试循环
                         
                         if img_retry_count > 0:
                             # 重试等待也使用指数退避
@@ -1062,6 +1309,20 @@ class SLDSpider:
                                 time.sleep(2)  # 等待2秒后重试
                             continue
                         
+                        # 打印图片详细信息用于调试 / Print detailed image information for debugging
+                        try:
+                            img_width = img_element.get_attribute('width') or "未知"
+                            img_height = img_element.get_attribute('height') or "未知"
+                            img_alt = img_element.get_attribute('alt') or "无描述"
+                            img_class = img_element.get_attribute('class') or "无类名"
+                            
+                            print(f"  • 图片详情 / Image details:")
+                            print(f"    - 尺寸 / Size: {img_width}x{img_height}")
+                            print(f"    - 描述 / Alt: {img_alt}")
+                            print(f"    - 类名 / Class: {img_class}")
+                        except Exception as detail_e:
+                            print(f"  • 获取图片详情失败 / Failed to get image details: {str(detail_e)}")
+                        
                         # 处理相对URL
                         if img_src.startswith("../"):
                             img_url = f"{base_url}/{img_src.replace('../', '', 1)}"
@@ -1083,8 +1344,14 @@ class SLDSpider:
                                 break
                         
                         # 完整的保存路径 / Complete save path
-                        img_save_path = os.path.join(PICTURE_DIR, save_dir, f"id{project_id}_{idx}{file_ext}")
-                        image_info["path"] = f"{save_dir}/id{project_id}_{idx}{file_ext}"
+                        if carousel_number:
+                            # 使用轮播编号命名
+                            img_save_path = os.path.join(PICTURE_DIR, save_dir, f"id{project_id}_{carousel_number}{file_ext}")
+                            image_info["path"] = f"{save_dir}/id{project_id}_{carousel_number}{file_ext}"
+                        else:
+                            # 使用常规索引命名
+                            img_save_path = os.path.join(PICTURE_DIR, save_dir, f"id{project_id}_{idx}{file_ext}")
+                            image_info["path"] = f"{save_dir}/id{project_id}_{idx}{file_ext}"
                         
                         # 下载图片 / Download image
                         print(f"  • 正在下载原始图片 ({file_ext}) / Downloading original image")
@@ -1126,7 +1393,10 @@ class SLDSpider:
                         # 检查保存结果
                         if os.path.exists(img_save_path) and os.path.getsize(img_save_path) > 10000:
                             # 更新下载状态记录 / Update download status record
-                            mark_image_downloaded(save_dir, project_id, idx)
+                            if carousel_number:
+                                mark_image_downloaded(save_dir, project_id, carousel_number)
+                            else:
+                                mark_image_downloaded(save_dir, project_id, idx)
                             
                             print(f"  ✓ 成功保存图片{' (重试成功)' if img_retry_count > 0 else ''} / Image saved successfully{' (retry succeeded)' if img_retry_count > 0 else ''}")
                             image_info["status"] = "success"
@@ -1187,7 +1457,17 @@ class SLDSpider:
             save_download_status(force=True)
     
     def crawl_and_download(self):
-        """爬取并下载所有分类的图片 / Crawl and download images for all categories"""
+        """
+        爬取并下载所有分类的图片
+        Crawl and download images for all categories
+        
+        注意：当使用轮播组件模式下载图片时，图片会使用其在轮播中的编号命名，例如id12_3.jpg表示
+        项目12的第3张图片（按照网站轮播显示的编号）。这样可以直观地看出哪些图片缺失。
+        
+        Note: When using carousel mode to download images, images will be named using their 
+        number in the carousel, e.g., id12_3.jpg means the 3rd image of project 12 
+        (according to the number shown in the website carousel). This allows easy identification of missing images.
+        """
         try:
             # 确保max_ids有效 / Ensure max_ids is valid
             if not self.max_ids:
@@ -1205,65 +1485,164 @@ class SLDSpider:
                     continue
                 
                 print(f"\n开始处理分类 / Starting category: {category}")
-                try:
-                    for project_id in range(1, max_id + 1):
-                        try:
-                            # 先检查该项目是否已全部下载
-                            if self._is_project_fully_downloaded(category, project_id):
-                                print(f"项目 {project_id}/{max_id} 所有图片已下载，跳过 / Project {project_id}/{max_id} all images already downloaded, skipping")
-                                continue
+                
+                # 添加分类级别的重试机制
+                category_retries = 0
+                max_category_retries = 3  # 最多重试3次
+                
+                while category_retries <= max_category_retries:
+                    try:
+                        # 如果是重试，输出提示并重新初始化浏览器
+                        if category_retries > 0:
+                            print(f"正在重试分类 {category}，第 {category_retries} 次尝试... / Retrying category {category}, attempt {category_retries}...")
                             
-                            # 简化URL构建，使用网站实际使用的格式
-                            print(f"处理项目 / Processing project: {project_id}/{max_id}")
-                            
-                            # 针对销售中心使用正确的URL格式
-                            if category == "salesoffice":
-                                url = f"https://www.sldgroup.com/tc/salesoffice-detail.aspx?id={project_id}"
-                            else:
-                                url = f"https://www.sldgroup.com/tc/{category}-detail.aspx?id={project_id}"
-                                
-                            print(f"使用URL: {url} / Using URL")
+                            # 重置浏览器状态
                             try:
-                                self._download_images(category, url, project_id)
-                            except Exception as url_e:
-                                print(f"项目下载失败: {url} - {str(url_e)} / Project download failed")
+                                if self.driver:
+                                    # 尝试清除所有cookies
+                                    self.driver.delete_all_cookies()
+                                    print("已清除所有cookies / Cleared all cookies")
+                                    
+                                    # 如果重试第3次，尝试重新初始化浏览器
+                                    if category_retries >= 2:
+                                        print("尝试重新初始化浏览器... / Trying to reinitialize browser...")
+                                        self.driver.quit()
+                                        time.sleep(3)
+                                        self._init_browser()
+                                        
+                                    # 强制刷新页面缓存
+                                    self.driver.execute_script('window.localStorage.clear(); window.sessionStorage.clear();')
+                            except Exception as reset_e:
+                                print(f"重置浏览器状态时出错: {str(reset_e)} / Error resetting browser state")
+                            
+                            # 等待一段时间再重试
+                            wait_time = 10 * (category_retries + 1)
+                            print(f"等待 {wait_time} 秒后重试... / Waiting {wait_time} seconds before retry...")
+                            time.sleep(wait_time)
+                        
+                        # 对于salesoffice特殊处理，先访问首页然后再访问分类页
+                        if category == "salesoffice":
+                            try:
+                                print("特殊处理salesoffice分类，先访问首页... / Special handling for salesoffice category, visiting homepage first...")
+                                self.driver.get("https://www.sldgroup.com/tc/index.aspx")
+                                time.sleep(5)  # 等待首页加载完成
+                            except Exception as home_e:
+                                print(f"访问首页时出错: {str(home_e)} / Error visiting homepage")
+                        
+                        for project_id in range(1, max_id + 1):
+                            try:
+                                # 先检查该项目是否已全部下载
+                                if self._is_project_fully_downloaded(category, project_id):
+                                    print(f"项目 {project_id}/{max_id} 所有图片已下载，跳过 / Project {project_id}/{max_id} all images already downloaded, skipping")
+                                    continue
+                                
+                                # 简化URL构建，使用网站实际使用的格式
+                                print(f"处理项目 / Processing project: {project_id}/{max_id}")
+                                
+                                # 使用URL路径映射确保正确的URL格式
+                                url_path = URL_PATH_MAPPING.get(category, category)
+                                url = f"https://www.sldgroup.com/tc/{url_path}-detail.aspx?id={project_id}"
+                                    
+                                print(f"使用URL: {url} / Using URL")
+                                try:
+                                    # 增加对salesoffice特殊处理
+                                    if category == "salesoffice":
+                                        # 使用更长的超时和更多重试来处理销售中心页面
+                                        try:
+                                            self._download_images(category, url, project_id)
+                                        except Exception as special_e:
+                                            print(f"销售中心项目下载失败，尝试备用方法: {str(special_e)} / Sales office project download failed, trying fallback method")
+                                            
+                                            # 特殊错误报告，输出更详细的信息
+                                            import traceback
+                                            print("详细错误信息: / Detailed error information:")
+                                            traceback.print_exc()
+                                            
+                                            # 尝试其他可能的URL格式
+                                            alt_url = f"https://www.sldgroup.com/tc/saleoffice-detail.aspx?id={project_id}"
+                                            if url != alt_url:
+                                                print(f"尝试备用URL: {alt_url} / Trying alternative URL")
+                                                self._download_images(category, alt_url, project_id)
+                                    else:
+                                        self._download_images(category, url, project_id)
+                                except Exception as url_e:
+                                    print(f"项目下载失败: {url} - {str(url_e)} / Project download failed")
+                                    # 特殊报告这个URL的错误，以便更好地理解问题
+                                    try:
+                                        import traceback
+                                        print(f"处理URL {url} 时的详细错误: / Detailed error while processing URL {url}:")
+                                        traceback.print_exc()
+                                    except:
+                                        pass
+                                    # 继续处理下一个项目
+                                    continue
+                                
+                                # 更随机的等待时间，避免触发反爬 / More random wait time to avoid triggering anti-crawling
+                                wait_time = random.uniform(MIN_WAIT_TIME * 2, MAX_WAIT_TIME * 2)
+                                print(f"等待 {wait_time:.1f} 秒后继续... / Waiting {wait_time:.1f}s before continuing...")
+                                time.sleep(wait_time)
+                                
+                            except Exception as project_e:
+                                print(f"处理项目 {project_id} 时出错: {str(project_e)} / Error processing project")
+                                # 出错了也要保存状态
+                                save_download_status(force=True)
                                 # 继续处理下一个项目
                                 continue
-                            
-                            # 更随机的等待时间，避免触发反爬 / More random wait time to avoid triggering anti-crawling
-                            wait_time = random.uniform(MIN_WAIT_TIME * 2, MAX_WAIT_TIME * 2)
-                            print(f"等待 {wait_time:.1f} 秒后继续... / Waiting {wait_time:.1f}s before continuing...")
-                            time.sleep(wait_time)
-                            
-                        except Exception as project_e:
-                            print(f"处理项目 {project_id} 时出错: {str(project_e)} / Error processing project")
-                            # 出错了也要保存状态
-                            save_download_status(force=True)
-                            # 继续处理下一个项目
+                        
+                        print(f"完成分类 / Completed category: {category}")
+                        # 每完成一个分类，强制保存状态 / After completing each category, force save the status
+                        save_download_status(force=True)
+                        
+                        # 成功完成当前分类，跳出重试循环
+                        break
+                        
+                    except Exception as category_e:
+                        category_retries += 1
+                        print(f"处理分类 {category} 时出错: {str(category_e)} / Error processing category")
+                        
+                        # 输出更详细的错误信息
+                        try:
+                            import traceback
+                            print(f"详细错误信息: / Detailed error information:")
+                            traceback.print_exc()
+                        except:
+                            pass
+                        
+                        # 出错了也要保存状态
+                        save_download_status(force=True)
+                        
+                        # 如果还有重试次数，则继续重试
+                        if category_retries <= max_category_retries:
                             continue
-                    
-                    print(f"完成分类 / Completed category: {category}")
-                    # 每完成一个分类，强制保存状态 / After completing each category, force save the status
-                    save_download_status(force=True)
-                    
-                except Exception as category_e:
-                    print(f"处理分类 {category} 时出错: {str(category_e)} / Error processing category")
-                    # 出错了也要保存状态
-                    save_download_status(force=True)
-                    # 继续处理下一个分类
-                    continue
+                        else:
+                            print(f"分类 {category} 处理失败，达到最大重试次数，跳过... / Category {category} processing failed, reached max retries, skipping...")
+                            # 跳到下一个分类
+                            break
+                
+                # 每个分类之间添加额外的延迟，减轻服务器负担，避免被检测为爬虫
+                if category != list(self.max_ids.keys())[-1]:  # 不是最后一个分类
+                    pause_time = random.uniform(10, 20)
+                    print(f"\n在处理下一个分类前暂停 {pause_time:.1f} 秒... / Pausing for {pause_time:.1f}s before next category...")
+                    time.sleep(pause_time)
             
             print("\n所有分类爬取完成 / All categories crawled")
             # 最终保存状态 / Final save status
             save_download_status(force=True)
-            
+                
         except Exception as e:
             print(f"爬取过程中出错 / Error during crawl: {str(e)}")
+            # 输出更详细的错误信息
+            try:
+                import traceback
+                print(f"详细错误信息: / Detailed error information:")
+                traceback.print_exc()
+            except:
+                pass
             # 即使出错也保存当前状态 / Save current status even if there is an error
             save_download_status(force=True)
         finally:
             self.cleanup()
-            
+    
     def _is_project_fully_downloaded(self, category, project_id):
         """检查项目的所有图片是否已下载 / Check if all images of a project are already downloaded"""
         global _download_status_cache
@@ -1347,7 +1726,7 @@ class SLDSpider:
                             max_index = max(max_index, index)
                         except:
                             pass
-                
+                        
                 if max_index >= 0:
                     count = max_index + 1  # 最大索引+1就是图片数量
                     
@@ -1435,20 +1814,53 @@ def main():
         if not os.path.exists(PICTURE_DIR):
             os.makedirs(PICTURE_DIR)
         
-        # 直接初始化爬虫，让Selenium自动寻找ChromeDriver / Initialize spider, let Selenium find ChromeDriver automatically
-        spider = SLDSpider(chromedriver_path=CHROMEDRIVER_PATH, auto_detect_ids=True)
+        # 导入traceback模块，用于详细错误报告
+        import traceback
         
-        # 检查爬虫是否成功初始化 / Check if spider is successfully initialized
-        if not spider.driver:
-            print("\n自动检测失败，正在尝试更多方法... / Automatic detection failed, trying more methods...")
-            # 尝试使用get_chromedriver_path找到ChromeDriver / Try to find ChromeDriver using get_chromedriver_path
-            detected_path = get_chromedriver_path()
-            if detected_path:
-                print(f"尝试使用检测到的ChromeDriver: {detected_path} / Trying detected ChromeDriver: {detected_path}")
-                spider = SLDSpider(chromedriver_path=detected_path, auto_detect_ids=True)
+        # 增加更强健的错误处理
+        max_init_retries = 3
+        init_retry_count = 0
+        spider = None
+        
+        while init_retry_count < max_init_retries:
+            try:
+                # 直接初始化爬虫，让Selenium自动寻找ChromeDriver / Initialize spider, let Selenium find ChromeDriver automatically
+                spider = SLDSpider(chromedriver_path=CHROMEDRIVER_PATH, auto_detect_ids=True)
+                
+                # 检查爬虫是否成功初始化 / Check if spider is successfully initialized
+                if not spider.driver:
+                    print("\n自动检测失败，正在尝试更多方法... / Automatic detection failed, trying more methods...")
+                    # 尝试使用get_chromedriver_path找到ChromeDriver / Try to find ChromeDriver using get_chromedriver_path
+                    detected_path = get_chromedriver_path()
+                    if detected_path:
+                        print(f"尝试使用检测到的ChromeDriver: {detected_path} / Trying detected ChromeDriver: {detected_path}")
+                        spider = SLDSpider(chromedriver_path=detected_path, auto_detect_ids=True)
+                
+                # 检查是否成功初始化，成功则跳出循环
+                if spider and spider.driver:
+                    print("✓ 爬虫初始化成功 / Spider initialized successfully")
+                    break
+                else:
+                    raise Exception("爬虫初始化失败 / Spider initialization failed")
+                    
+            except Exception as init_e:
+                init_retry_count += 1
+                print(f"爬虫初始化失败 (尝试 {init_retry_count}/{max_init_retries}): {str(init_e)} / Spider initialization failed")
+                
+                # 输出详细的错误信息
+                print("详细错误信息: / Detailed error information:")
+                traceback.print_exc()
+                
+                if init_retry_count < max_init_retries:
+                    wait_time = 5 * init_retry_count
+                    print(f"等待 {wait_time} 秒后重试... / Waiting {wait_time}s before retrying...")
+                    time.sleep(wait_time)
+                else:
+                    print("达到最大重试次数，退出... / Maximum retries reached, exiting...")
+                    raise
         
         # 最终检查 / Final check
-        if not spider.driver:
+        if not spider or not spider.driver:
             raise Exception("无法初始化浏览器，请确保已安装最新的Chrome并将ChromeDriver放在正确位置 / Cannot initialize browser, please make sure Chrome is installed and ChromeDriver is in the correct location")
             
         # 爬取并下载图片 / Crawl and download images
@@ -1459,8 +1871,23 @@ def main():
     
     except KeyboardInterrupt:
         print("\n用户中断爬取过程 / User interrupted the crawling process")
+        # 尝试保存当前状态
+        try:
+            save_download_status(force=True)
+            print("已保存当前下载状态 / Current download status saved")
+        except:
+            pass
     except Exception as e:
         print(f"\n爬取过程中出错 / Error during crawling: {str(e)}")
+        
+        # 输出详细的错误信息
+        try:
+            import traceback
+            print("详细错误信息: / Detailed error information:")
+            traceback.print_exc()
+        except:
+            pass
+            
         print("\n可能的解决方法 / Possible solutions:")
         print("1. 确保已安装Chrome浏览器 / Make sure Chrome browser is installed")
         print("2. 下载与Chrome版本匹配的ChromeDriver并放在程序目录 / Download ChromeDriver matching Chrome version and place it in program directory:")
@@ -1468,6 +1895,19 @@ def main():
         print("3. 使用命令行选项指定ChromeDriver路径 / Use command line option to specify ChromeDriver path:")
         print("   python sldgroup-spider.py --driver /path/to/chromedriver")
         print("4. 如果您已经有ChromeDriver但自动检测失败，请使用命令行选项手动指定路径 / If you already have ChromeDriver but auto-detection fails, manually specify the path")
+    finally:
+        # 确保保存下载状态
+        try:
+            save_download_status(force=True)
+        except:
+            pass
+        
+        # 清理浏览器资源
+        if 'spider' in locals() and spider:
+            try:
+                spider.cleanup()
+            except:
+                pass
 
 if __name__ == "__main__":
     main() 
