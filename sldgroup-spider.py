@@ -445,7 +445,7 @@ class SLDSpider:
                 try:
                     self._get_max_ids()
                 except Exception as e:
-                        print(f"动态获取最大ID失败: {str(e)}，使用默认值 / Failed to get maximum IDs: {str(e)}, using default values")
+                    print(f"动态获取最大ID失败: {str(e)}，使用默认值 / Failed to get maximum IDs: {str(e)}, using default values")
     
     def _init_browser(self):
         """初始化浏览器，返回是否成功 / Initialize the browser, return whether successful"""
@@ -483,8 +483,8 @@ class SLDSpider:
             print(f"系统自动查找失败: {str(e)} / System auto-detection failed")
         
         # 如果指定了ChromeDriver路径，直接尝试使用
-            if self.chromedriver_path:
-                return self._try_init_with_driver(self.chromedriver_path, chrome_options)
+        if self.chromedriver_path:
+            return self._try_init_with_driver(self.chromedriver_path, chrome_options)
         
         # 没有指定路径，尝试所有可能的位置
         return self._try_local_drivers(chrome_options)
