@@ -2,10 +2,12 @@
 
 sldgroup.com写了个动态web不让你爬, 你爬不爬? 赶紧说, 你死都得爬. 那要是被SLD逮住了怎么办, 那只能很尴尬地笑. 然后捂着头.
 
+# SLD集团网站图片爬虫 / SLD Group Website Image Crawler
 
 ## 项目介绍 / Project Introduction
 
 这是一个专门用于爬取 [SLD集团网站](https://www.sldgroup.com/) 图片的爬虫程序。它使用Selenium抓取动态加载的内容，支持自动下载ChromeDriver和断点续传功能。
+
 This is a crawler specifically designed to download images from the [SLD Group website](https://www.sldgroup.com/). It uses Selenium to capture dynamically loaded content and supports automatic ChromeDriver download and resume download functionality.
 
 本项目包含两个主要脚本：
@@ -86,6 +88,26 @@ python convert_to_png.py path/to/your/image/directory
 └── chromedriver/         # ChromeDriver下载目录 / ChromeDriver download directory
 ```
 
+## 特点功能 / Key Features
+
+- **自动化爬取** / **Automated Crawling**：使用Selenium模拟浏览器行为，自动处理动态加载内容
+  Uses Selenium to simulate browser behavior and automatically handle dynamically loaded content
+
+- **断点续传** / **Resume Downloads**：支持从上次中断的位置继续下载，避免重复工作
+  Supports resuming downloads from where it was interrupted, avoiding duplicate work
+
+- **自动查找ChromeDriver** / **Auto-detect ChromeDriver**：自动查找或下载与Chrome浏览器版本匹配的ChromeDriver
+  Automatically detects or downloads ChromeDriver matching your Chrome browser version
+
+- **多分类爬取** / **Multi-category Crawling**：支持爬取网站的所有项目分类（住宅、会所、销售中心、酒店、商业）
+  Supports crawling all project categories on the website (residential, clubhouse, sales office, hospitality, commercial)
+
+- **智能检测** / **Smart Detection**：智能检测已下载图片，避免重复下载
+  Intelligently detects already downloaded images to avoid redundant downloads
+
+- **反爬虫策略** / **Anti-scraping Measures**：实现多种反爬虫检测技术，减少被网站屏蔽的可能性
+  Implements various anti-detection techniques to reduce the possibility of being blocked by the website
+
 ## 注意事项 / Notes
 
 1. 此程序仅供学习和研究使用，请勿用于商业目的
@@ -102,4 +124,34 @@ python convert_to_png.py path/to/your/image/directory
 
 5. 爬虫程序支持断点续传，意外中断后可以继续从上次中断的地方开始下载
    The crawler program supports resuming downloads, allowing you to continue from where you left off after an unexpected interruption
+
+## 故障排除 / Troubleshooting
+
+如果遇到以下问题，可以尝试相应的解决方法：
+If you encounter the following issues, you can try the corresponding solutions:
+
+1. **ChromeDriver初始化失败** / **ChromeDriver initialization failed**
+   - 确保Chrome浏览器已正确安装 / Ensure Chrome browser is correctly installed
+   - 手动下载匹配版本的ChromeDriver / Manually download the matching version of ChromeDriver
+   - 使用`--driver`参数指定ChromeDriver路径 / Use the `--driver` parameter to specify ChromeDriver path
+
+2. **图片下载失败** / **Image download failed**
+   - 检查网络连接 / Check network connection
+   - 适当增加等待时间 / Increase wait time appropriately
+   - 可能需要配置代理 / May need to configure a proxy
+
+3. **被网站封禁** / **Blocked by the website**
+   - 减少访问频率 / Reduce access frequency
+   - 增加随机等待时间 / Increase random wait time
+   - 更换IP地址或使用代理 / Change IP address or use a proxy
+
+## 贡献与改进 / Contribution and Improvement
+
+欢迎提出建议和改进，或者提交问题报告。您可以通过以下方式参与项目：
+
+Suggestions for improvement and bug reports are welcome. You can participate in the project by:
+
+1. 提交Bug报告或功能请求 / Submit bug reports or feature requests
+2. 改进代码并提交拉取请求 / Improve the code and submit pull requests
+3. 分享您的使用经验和建议 / Share your experience and suggestions
 
