@@ -72,276 +72,6 @@ _processed_count = 0
 # Record retry attempts for current project, for exponential backoff
 _current_project_retries = {}
 
-def get_chrome_version():
-    """
-    获取系统已安装的Chrome版本
-    Get installed Chrome version from the system
-    
-    返回值 / Returns:
-        str or None: Chrome版本号或None（如果未检测到） / Chrome version or None if not detected
-    """
-    try:
-        system = platform.system()
-        if system == "Windows":
-            try:
-                import winreg
-                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon")
-                version, _ = winreg.QueryValueEx(key, "version")
-                print(f"检测到Chrome版本: {version} / Detected Chrome version: {version}")
-                return version
-            except:
-                # 尝试其他Windows路径 / Try other Windows paths
-                paths = [
-                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-                ]
-                for path in paths:
-                    if os.path.exists(path):
-                        try:
-                            version = subprocess.check_output(f'wmic datafile where name="{path}" get Version /value', shell=True)
-                            version = version.decode('utf-8').strip().split('=')[-1]
-                            if version:
-                                print(f"检测到Chrome版本: {version} / Detected Chrome version: {version}")
-                                return version
-                        except:
-                            pass
-        elif system == "Darwin":  # macOS
-            try:
-                version = subprocess.check_output(
-                    ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "--version"],
-                    stderr=subprocess.DEVNULL
-                ).decode('utf-8')
-                match = re.search(r"Chrome\s+(\d+\.\d+\.\d+\.\d+)", version)
-                if match:
-                    print(f"检测到Chrome版本: {match.group(1)} / Detected Chrome version: {match.group(1)}")
-                    return match.group(1)
-            except:
-                pass
-        elif system == "Linux":
-            try:
-                # 尝试标准Google Chrome / Try standard Google Chrome
-                version = subprocess.check_output(
-                    ["google-chrome", "--version"],
-                    stderr=subprocess.DEVNULL
-                ).decode('utf-8')
-                match = re.search(r"Chrome\s+(\d+\.\d+\.\d+\.\d+)", version)
-                if match:
-                    print(f"检测到Chrome版本: {match.group(1)} / Detected Chrome version: {match.group(1)}")
-                    return match.group(1)
-            except:
-                try:
-                    # 尝试Chromium / Try Chromium
-                    version = subprocess.check_output(
-                        ["chromium", "--version"],
-                        stderr=subprocess.DEVNULL
-                    ).decode('utf-8')
-                    match = re.search(r"Chromium\s+(\d+\.\d+\.\d+\.\d+)", version)
-                    if match:
-                        print(f"检测到Chromium版本: {match.group(1)} / Detected Chromium version: {match.group(1)}")
-                        return match.group(1)
-                except:
-                    pass
-    except Exception as e:
-        print(f"获取Chrome版本时出错 / Error getting Chrome version: {str(e)}")
-    
-    print(f"无法检测Chrome版本，将使用默认版本: {CHROMEDRIVER_VERSION} / Cannot detect Chrome version, will use default: {CHROMEDRIVER_VERSION}")
-    return None
-
-def get_latest_chromedriver_version():
-    """获取最新的ChromeDriver版本号 / Get latest ChromeDriver version"""
-    try:
-        # 首先尝试获取Chrome版本 / First try to get Chrome version
-        chrome_version = get_chrome_version()
-        if chrome_version:
-            # 提取Chrome主版本号（如134.0.6998.89中的134）/ Extract major version (e.g. 134 from 134.0.6998.89)
-            major_version = chrome_version.split('.')[0]
-            # 尝试获取该主版本对应的ChromeDriver版本 / Try to get matching ChromeDriver version
-            response = requests.get(f"https://mirrors.huaweicloud.com/chromedriver/LATEST_RELEASE_{major_version}")
-            if response.status_code == 200:
-                version = response.text.strip()
-                print(f"找到对应ChromeDriver版本: {version} / Found matching ChromeDriver version: {version}")
-                return version
-        
-        # 如果没有获取到Chrome版本或找不到对应版本的ChromeDriver，尝试获取最新版本
-        # If Chrome version is not found or matching ChromeDriver not available, try to get latest version
-        response = requests.get("https://mirrors.huaweicloud.com/chromedriver/LATEST_RELEASE")
-        if response.status_code == 200:
-            version = response.text.strip()
-            print(f"找到最新ChromeDriver版本: {version} / Found latest ChromeDriver version: {version}")
-            return version
-    except Exception as e:
-        print(f"获取ChromeDriver版本时出错: {str(e)} / Error getting ChromeDriver version: {str(e)}")
-    
-    # 如果以上所有尝试都失败，使用默认版本 / If all attempts fail, use default version
-    print(f"使用默认ChromeDriver版本: {CHROMEDRIVER_VERSION} / Using default ChromeDriver version: {CHROMEDRIVER_VERSION}")
-    return CHROMEDRIVER_VERSION
-
-def download_chromedriver():
-    """下载与系统匹配的ChromeDriver / Download ChromeDriver matching the system"""
-    try:
-        print("\n>>> 开始下载ChromeDriver... / Starting ChromeDriver download...")
-        
-        if not os.path.exists(CHROMEDRIVER_DIR):
-            os.makedirs(CHROMEDRIVER_DIR)
-        
-        system = platform.system()
-        machine = platform.machine().lower()
-        
-        chromedriver_filename = "chromedriver"
-        if system == "Windows":
-            chromedriver_filename += ".exe"
-        
-        chromedriver_path = os.path.join(CHROMEDRIVER_DIR, chromedriver_filename)
-        
-        # 清理旧版本
-        if os.path.exists(chromedriver_path):
-            try:
-                os.remove(chromedriver_path)
-                print("删除旧版ChromeDriver / Removing old ChromeDriver")
-            except:
-                pass
-        
-        # 确定ChromeDriver版本
-        version = CHROMEDRIVER_VERSION if CHROMEDRIVER_VERSION else get_latest_chromedriver_version()
-        print(f"使用ChromeDriver版本 / Using ChromeDriver version: {version}")
-        
-        zip_name = None
-        if system == "Windows":
-            if machine.endswith('64'):
-                zip_name = "chromedriver-win64.zip"
-            else:
-                zip_name = "chromedriver-win32.zip"
-        elif system == "Darwin":  # macOS
-            if 'arm' in machine or 'aarch64' in machine:
-                zip_name = "chromedriver-mac-arm64.zip"
-            else:
-                zip_name = "chromedriver-mac-x64.zip"
-        elif system == "Linux":
-            zip_name = "chromedriver-linux64.zip"
-        
-        if not zip_name:
-            print(f"无法确定系统类型，尝试使用通用版本 / Cannot determine system type, using generic version")
-            # 尝试使用通用版本
-            if system == "Windows":
-                zip_name = "chromedriver-win32.zip"
-            else:
-                zip_name = "chromedriver-linux64.zip"
-        
-        # 构建下载URL - 先尝试华为镜像，再尝试其他镜像
-        download_urls = [
-            f"https://mirrors.huaweicloud.com/chromedriver/{version}/{zip_name}",
-            f"https://registry.npmmirror.com/binary.html?path=chromedriver/{version}/{zip_name}",
-            f"https://cdn.npmmirror.com/binaries/chromedriver/{version}/{zip_name}"
-        ]
-        
-        zip_path = os.path.join(CHROMEDRIVER_DIR, zip_name)
-        downloaded = False
-        
-        # 尝试从多个镜像下载
-        for url in download_urls:
-            if downloaded:
-                break
-                
-            print(f"尝试下载: {url} / Trying download from: {url}")
-            
-            try:
-                response = requests.get(url, stream=True)
-                if response.status_code == 200 and int(response.headers.get('content-length', 0)) > 1000000:
-                    with open(zip_path, 'wb') as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                    
-                    if os.path.exists(zip_path) and os.path.getsize(zip_path) > 1000000:
-                        downloaded = True
-                        print(f"下载成功 / Download successful")
-            except Exception as e:
-                print(f"从 {url} 下载失败: {str(e)} / Download failed from {url}")
-        
-        # 如果下载失败，尝试使用urllib
-        if not downloaded:
-            try:
-                print("尝试使用urllib下载 / Trying download with urllib")
-                urllib.request.urlretrieve(download_urls[0], zip_path)
-                if os.path.exists(zip_path) and os.path.getsize(zip_path) > 1000000:
-                    downloaded = True
-            except:
-                pass
-        
-        # 如果仍然下载失败
-        if not downloaded or not os.path.exists(zip_path) or os.path.getsize(zip_path) < 1000000:
-            print(f"所有下载尝试都失败 / All download attempts failed")
-            # 提示用户手动下载
-            print(f"请手动下载ChromeDriver: / Please download ChromeDriver manually:")
-            print(f"1. 访问 / Visit: https://registry.npmmirror.com/binary.html?path=chromedriver/{version}/")
-            print(f"2. 下载 / Download: {zip_name}")
-            print(f"3. 解压并将ChromeDriver放在当前目录 / Extract and place ChromeDriver in current directory")
-            return None
-        
-        # 解压文件
-        success = False
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                # 尝试直接提取chromedriver
-                chromedriver_files = [f for f in zip_ref.namelist() if os.path.basename(f) == chromedriver_filename]
-                if chromedriver_files:
-                    for file in chromedriver_files:
-                        source = zip_ref.open(file)
-                        target = open(chromedriver_path, "wb")
-                        with source, target:
-                            target.write(source.read())
-                        success = True
-                        break
-                # 如果没有找到，解压整个目录
-                if not success:
-                    zip_ref.extractall(CHROMEDRIVER_DIR)
-                    success = True
-        except Exception as e:
-            print(f"解压失败: {str(e)} / Extraction failed")
-            return None
-        
-        # 确保文件存在
-        if not os.path.exists(chromedriver_path):
-            # 查找解压后的目录中的chromedriver
-            for root, dirs, files in os.walk(CHROMEDRIVER_DIR):
-                for file in files:
-                    if file.startswith("chromedriver"):
-                        src = os.path.join(root, file)
-                        print(f"找到ChromeDriver: {src} / Found ChromeDriver")
-                        # 复制到目标位置
-                        import shutil
-                        shutil.copy2(src, chromedriver_path)
-                        success = True
-                        break
-        
-        # 设置执行权限
-        if system != "Windows" and os.path.exists(chromedriver_path):
-            os.chmod(chromedriver_path, 0o755)
-        
-        # 验证ChromeDriver是否可执行
-        if os.path.exists(chromedriver_path) and os.path.getsize(chromedriver_path) > 1000000:
-            print(f"ChromeDriver下载成功: {chromedriver_path} / ChromeDriver downloaded successfully")
-            
-            # 在Windows上可能需要将.exe添加到路径中
-            if system == "Windows" and not chromedriver_path.endswith('.exe'):
-                os.rename(chromedriver_path, chromedriver_path + '.exe')
-                chromedriver_path += '.exe'
-            
-            # 清理临时文件
-            try:
-                os.remove(zip_path)
-            except:
-                pass
-                
-            return chromedriver_path
-        else:
-            print(f"ChromeDriver下载或解压失败 / ChromeDriver download or extraction failed")
-            return None
-    
-    except Exception as e:
-        print(f"下载ChromeDriver时出错: {str(e)} / Error downloading ChromeDriver")
-        return None
-
 def get_chromedriver_path():
     """获取ChromeDriver路径，如果不存在则尝试下载 / Get ChromeDriver path, try to download if not exists"""
     system = platform.system()
@@ -412,7 +142,7 @@ def get_chromedriver_path():
     for location in check_locations:
         print(f"  - {location}")
     print("将尝试下载ChromeDriver... / Will try to download ChromeDriver...")
-    return download_chromedriver()
+    return get_chromedriver_path()
 
 def load_download_status():
     """加载下载状态 / Load download status"""
@@ -731,7 +461,7 @@ class SLDSpider:
 
                 # 构建分类页面URL
                 if category == "salesoffice":
-                    category_url = f"https://www.sldgroup.com/tc/saleoffice.aspx"
+                    category_url = "https://www.sldgroup.com/tc/salesoffice.aspx"
                 else:
                     url_path = URL_PATH_MAPPING.get(category, category)
                     category_url = f"https://www.sldgroup.com/tc/{url_path}.aspx"
@@ -739,7 +469,7 @@ class SLDSpider:
                 print(f"访问分类页面 / Visiting category page: {category_url}")
                 try:
                     self.driver.get(category_url)
-                    time.sleep(5)
+                    time.sleep(3)
                     self.wait.until(EC.presence_of_element_located((By.ID, "mWorkDiv")))
                     project_links = self.driver.find_elements(By.XPATH, '//*[@id="mWorkDiv"]/li/a')
                     max_id = 0
