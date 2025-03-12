@@ -339,12 +339,12 @@ class SLDSpider:
         """下载项目页面中的所有图片 / Download all images in the project page"""
         global _current_project_retries, _download_status_cache, _status_modified
         _current_project_retries = {}
-
+        
         # 强制加载当前项目详情页，确保页面正确
         print(f"加载项目详情页: {project_detail_url} / Loading project detail page: {project_detail_url}")
         self.driver.get(project_detail_url)
         time.sleep(3)
-
+                
         # 通过aria-label获取图片总数
         current_url = self.driver.current_url
         if f"id={project_id}" not in current_url:
@@ -377,8 +377,8 @@ class SLDSpider:
             if all_downloaded:
                 print(f"  ✓ 所有 {total_image_count} 张图片已下载，跳过 / All {total_image_count} images downloaded, skipping")
                 return
-            else:
-                print("  • 图片不完整，继续下载 / Images incomplete, continuing download")
+        else:
+            print("  • 图片不完整，继续下载 / Images incomplete, continuing download")
 
         image_status = {"total": total_image_count, "downloaded": 0, "skipped": 0, "failed": 0, "retried": 0, "details": []}
 
@@ -396,9 +396,9 @@ class SLDSpider:
                     if img_src.lower().endswith(ext):
                         file_ext = ext
                         break
-
+                        
                 img_save_path = os.path.join(PICTURE_DIR, save_dir, f"id{project_id}_{idx}{file_ext}")
-
+                
                 print(f"  • 正在下载第 {idx+1} 张图片 ({file_ext}) / Downloading image {idx+1}")
                 headers = {
                     'User-Agent': random_ua()["User-Agent"],
@@ -416,7 +416,7 @@ class SLDSpider:
                 else:
                     print(f"  ✗ 第 {idx+1} 张图片下载失败，HTTP状态码: {response.status_code}")
                     continue
-
+                
                 if os.path.exists(img_save_path) and os.path.getsize(img_save_path) > 10000:
                     mark_image_downloaded(save_dir, project_id, idx)
                     print(f"  ✓ 成功保存第 {idx+1} 张图片 / Image {idx+1} saved successfully")
@@ -424,12 +424,6 @@ class SLDSpider:
                     print(f"  ✗ 第 {idx+1} 张图片保存失败或文件太小 / Image {idx+1} save failed or file too small")
             except Exception as e:
                 print(f"  ✗ 处理第 {idx+1} 张图片出错: {str(e)}")
-            if idx < total_image_count - 1:
-                try:
-                    self.driver.execute_script("document.querySelector('#mSwiperDiv').swiper.slideNext()")
-                    time.sleep(1)
-                except Exception as slide_e:
-                    print(f"切换到下一张图片失败: {slide_e}")
 
         print("\n下载总结 / Download summary:")
         print(f"• 总图片数: {image_status['total']}")
@@ -437,13 +431,13 @@ class SLDSpider:
         print(f"• 已存在跳过: {image_status['skipped']}")
         print(f"• 重试次数: {image_status['retried']}")
         print(f"• 下载失败: {image_status['failed']}")
-
+            
         if image_status['failed'] > 0:
             print("\n失败详情 / Failure details:")
             for img in image_status["details"]:
                 if img["status"] == "failed":
                     print(f"• {img['path']} - 原因: {img['reason']}")
-
+            
         save_download_status(force=True)
 
     def crawl_and_download(self):
@@ -455,10 +449,10 @@ class SLDSpider:
             global _download_status_cache
             if _download_status_cache is None:
                 _download_status_cache = load_download_status()
-
+                
             for category in self.save_dirs:
                 print(f"\n开始处理分类 / Starting category: {category}")
-
+                
                 # 构建分类页面URL
                 if category == "salesoffice":
                     category_url = "https://www.sldgroup.com/tc/salesoffice.aspx"
@@ -506,12 +500,12 @@ class SLDSpider:
                         print(f"处理项目 {project_id} 时出错: {str(project_e)} / Error processing project")
                         save_download_status(force=True)
                         continue
-
+                
                 # 分类之间添加额外延迟
                 pause_time = random.uniform(10, 20)
                 print(f"\n在处理下一个分类前暂停 {pause_time:.1f} 秒... / Pausing for {pause_time:.1f}s before next category...")
                 time.sleep(pause_time)
-
+            
             print("\n所有分类爬取完成 / All categories crawled")
             save_download_status(force=True)
         except Exception as e:
@@ -525,7 +519,7 @@ class SLDSpider:
             save_download_status(force=True)
         finally:
             self.cleanup()
-
+    
     def cleanup(self):
         """
         清理资源，关闭浏览器
