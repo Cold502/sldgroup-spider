@@ -1,10 +1,6 @@
 你好, 我是来自大陆北方的网友.
 
-SLD写了个动态web不让你爬, 你爬不爬? 赶紧说, 你死都得爬. 那要是被SLD逮住了怎么办, 那只能很尴尬地笑. 然后捂着头.
-
-# SLD集团网站图片爬虫
-
-# SLD Group Website Image Crawler
+sldgroup.com写了个动态web不让你爬, 你爬不爬? 赶紧说, 你死都得爬. 那要是被SLD逮住了怎么办, 那只能很尴尬地笑. 然后捂着头.
 
 
 ## 项目介绍 / Project Introduction
@@ -28,7 +24,7 @@ Before using, please ensure you have installed the following dependencies:
 
 ```bash
 # 安装爬虫所需依赖 / Install dependencies for the crawler
-pip install selenium requests random-user-agent pillow
+pip install selenium requests pillow
 ```
 
 另外，您需要安装Chrome浏览器。爬虫程序会尝试自动下载并使用匹配的ChromeDriver。
