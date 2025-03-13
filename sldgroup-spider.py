@@ -502,7 +502,7 @@ class SLDSpider:
                         continue
                 
                 # 分类之间添加额外延迟
-                pause_time = random.uniform(10, 20)
+                pause_time = random.uniform(5, 10)
                 print(f"\n在处理下一个分类前暂停 {pause_time:.1f} 秒... / Pausing for {pause_time:.1f}s before next category...")
                 time.sleep(pause_time)
             
